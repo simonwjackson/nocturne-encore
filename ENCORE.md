@@ -41,8 +41,8 @@ To offer one enhancement upstream, branch from `upstream/main`, copy only its
    separate dev mod.
 4. Look up addresses through `game_symbols`. Add the title-update build.
 5. Add an on/off setting that persists and changes live.
-6. Size the margin from the window shape and the stretch preset. Stay within
-   the 512-pixel VRAM limit (margin 128 or less) and on screen.
+6. Done: Auto margin from the front-end frame and the stretch preset, live.
+   Open: a window that is not 16:9 is letterboxed by the SDK.
 7. Work with `graphics_settings`, which rewrites the stretch rectangle every
    frame. Its `graphics_settings.preset_applied` event is a likely hook.
 8. Double buffering. Two 384-wide buffers do not fit below the texture pages
@@ -52,7 +52,8 @@ To offer one enhancement upstream, branch from `upstream/main`, copy only its
 10. Decide what the margins show: early reveals (Dracula on his throne) and
     pop-in at the margin edge.
 11. Rooms with invalid tile data outside the room, and repeating layers.
-12. Every HUD: Alucard's HUD, boss gauges, dialogue boxes, partly hidden parts.
+12. Done for the Richter HUD: left and right groups dock to the picture
+    edges. Open: the boss gauge in view, Alucard's HUD, widened fades.
 13. Native framing in the pause menu, map, inventory, cutscenes, room
     transitions, game over and title screen.
 14. Same-frame and activation checks across many room types, including the

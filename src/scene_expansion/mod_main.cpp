@@ -123,8 +123,17 @@ void RunCommand(const std::string& line) {
     expand::Settings().frozen = v == "on";
     Log(line);
   } else if (op == "margin") {
-    in >> expand::Settings().margin;
+    std::string v;
+    in >> v;
+    expand::Settings().margin = v == "auto" ? -1 : std::stoi(v);
     Log(line);
+  } else if (op == "dock") {
+    std::string v;
+    in >> v;
+    expand::Settings().dock = v == "on";
+    Log(line);
+  } else if (op == "status") {
+    Log(expand::Status());
   } else if (op == "snapshot") {
     std::string v, a, b;
     in >> v >> a >> b;

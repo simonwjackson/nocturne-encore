@@ -15,6 +15,7 @@
 #include <rex/system/xmemory.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace expand {
@@ -41,6 +42,18 @@ constexpr uint32_t kPrimBuf = 0x831751E0u;        // Primitive[0x500], 56 bytes 
 constexpr int kPrimCount = 0x500;
 constexpr uint32_t kPrimSize = 56;
 constexpr uint16_t kDrawHide = 0x8, kDrawAbsPos = 0x2000;
+constexpr uint32_t kStretchRectMax = 0x82882C98u;  // s32 LTRB: the whole front-end frame
+// Player HUD record (DrawRichterHud, sub_8225BBC8, writes it at r31): +4 and
+// +8 hold the first g_PrimBuf index of the two HUD primitive chains.
+constexpr uint32_t kPlayerHud = 0x82E86BF0u;
+// Primitive record fields (56 bytes in this build).
+constexpr uint32_t kPrimType = 5, kPrimX0 = 12, kPrimY0 = 14, kPrimU0 = 16, kPrimV0 = 17,
+                   kPrimR0 = 8, kPrimX1 = 24, kPrimU1 = 28, kPrimY1 = 26, kPrimR1 = 20, kPrimX2 = 36,
+                   kPrimY2 = 38, kPrimR2 = 32, kPrimPriority = 42, kPrimX3 = 48, kPrimY3 = 50,
+                   kPrimR3 = 44, kPrimDrawMode = 54;
+// The HUD draws at ordering-table priorities 0x1EE-0x1F0 (Richter and Alucard).
+constexpr uint16_t kHudPriorityLow = 0x1EE, kHudPriorityHigh = 0x1F0;
+constexpr int kMaxMargin = 128;  // 256 + 2*128 = 512, the start of the texture pages
 
 // Tile layer record. Read from the guest tile-layer routine sub_82258190:
 // the foreground record is at kTilemap (r24 in that routine) and the 16
@@ -76,6 +89,13 @@ int g_pool_used = 0;
 bool g_rect_widened = false;
 int32_t g_rect_base[4] = {};
 int32_t g_rect_ours[4] = {};
+int g_margin = 0;          // margin in effect this frame (0 = not expanded)
+int g_applied_margin = 0;  // margin last written to the stage buffers
+
+// Primitive counters for the last expanded frame.
+struct UiCounts {
+  int docked_left = 0, docked_right = 0, overlays = 0, hidden = 0;
+} g_ui;
 
 uint8_t* P(uint32_t a) { return g_rt->memory()->TranslateVirtual<uint8_t*>(a); }
 uint32_t R32(uint32_t a) {
@@ -130,25 +150,55 @@ Env Expanded(int margin) {
   return Env{0, w, int16_t(margin), 0, w};
 }
 
-// Returns true when the stage buffers currently carry the expanded layout.
-bool ApplyEnvs() {
+// Writes the stage buffers for `margin` (0 restores the game's layout).
+// Returns true when the stage buffers carry an expanded layout this frame.
+bool ApplyEnvs(int margin) {
   Env e0 = ReadEnv(kGpuBuffer0), e1 = ReadEnv(kGpuBuffer1);
-  Env want = Expanded(g_cfg.margin);
   bool stage = Same(e0, kStage0) && Same(e1, kStage1);
-  bool ours = Same(e0, want) && Same(e1, want);
-  if (g_cfg.enabled) {
-    if (stage) {
+  Env ours_env = Expanded(g_applied_margin);
+  bool ours = g_applied_margin > 0 && Same(e0, ours_env) && Same(e1, ours_env);
+  if (margin > 0 && (stage || ours)) {
+    if (!ours || margin != g_applied_margin) {
+      Env want = Expanded(margin);
       WriteEnv(kGpuBuffer0, want);
       WriteEnv(kGpuBuffer1, want);
-      return true;
+      g_applied_margin = margin;
     }
-    return ours;
+    return true;
   }
   if (ours) {
     WriteEnv(kGpuBuffer0, kStage0);
     WriteEnv(kGpuBuffer1, kStage1);
   }
+  g_applied_margin = 0;
   return false;
+}
+
+// The stretch rectangle the game or the player chose, ignoring our widening.
+void BaseRect(int32_t out[4]) {
+  int32_t cur[4];
+  for (int i = 0; i < 4; ++i) cur[i] = int32_t(R32(kStretchRect + 4 * i));
+  bool is_ours = g_rect_widened && std::memcmp(cur, g_rect_ours, sizeof cur) == 0;
+  std::memcpy(out, is_ours ? g_rect_base : cur, sizeof cur);
+}
+
+// Auto margin: the widest picture, at the same pixel scale, whose sides stay
+// inside the front-end frame. The frame and the base rectangle are read every
+// frame, so a new stretch preset or resolution changes the margin live.
+int ResolveMargin() {
+  if (!g_cfg.enabled) return 0;
+  if (g_cfg.margin >= 0) return std::min(g_cfg.margin, kMaxMargin);
+  int32_t base[4], frame[4];
+  BaseRect(base);
+  for (int i = 0; i < 4; ++i) frame[i] = int32_t(R32(kStretchRectMax + 4 * i));
+  int64_t width = int64_t(base[2]) - base[0];
+  if (width <= 0) return 0;
+  // Half the room on the narrower side, in PS1 pixels: room * 256 / width.
+  int64_t centre2 = int64_t(base[2]) + base[0];
+  int64_t room2 = std::min(centre2 - 2 * int64_t(frame[0]), 2 * int64_t(frame[2]) - centre2);
+  int64_t half_total = room2 * kStageWidth / (2 * width);  // PS1 px from centre to frame edge
+  int64_t margin = half_total - kStageWidth / 2;
+  return int(std::clamp<int64_t>(margin, 0, kMaxMargin));
 }
 
 void ApplyStretch(bool expanded) {
@@ -162,17 +212,19 @@ void ApplyStretch(bool expanded) {
     g_rect_widened = false;
     return;
   }
-  if (is_ours) return;
-  // New base (first frame, or the player/game changed the rectangle).
-  std::memcpy(g_rect_base, cur, sizeof cur);
-  int64_t width = int64_t(cur[2]) - cur[0];
-  int64_t centre2 = int64_t(cur[2]) + cur[0];  // 2 * centre
-  int64_t total = int64_t(kStageWidth + 2 * g_cfg.margin);
+  if (!is_ours) {
+    // New base (first frame, or the player or game changed the rectangle).
+    std::memcpy(g_rect_base, cur, sizeof cur);
+  }
+  const int32_t* b = g_rect_base;
+  int64_t width = int64_t(b[2]) - b[0];
+  int64_t centre2 = int64_t(b[2]) + b[0];  // 2 * centre
+  int64_t total = int64_t(kStageWidth + 2 * g_margin);
   int64_t new_width = width * total / kStageWidth;
   g_rect_ours[0] = int32_t((centre2 - new_width) / 2);
   g_rect_ours[2] = int32_t(g_rect_ours[0] + new_width);
-  g_rect_ours[1] = cur[1];
-  g_rect_ours[3] = cur[3];
+  g_rect_ours[1] = b[1];
+  g_rect_ours[3] = b[3];
   for (int i = 0; i < 4; ++i) W32(kStretchRect + 4 * i, uint32_t(g_rect_ours[i]));
   g_rect_widened = true;
 }
@@ -264,57 +316,142 @@ extern "C" void Expand_RenderTilemap(PPCContext& ctx, uint8_t* base) {
     uint32_t ot = R32(kCurrentBuffer) + kOtOffset;
     // Before the original call: the original then inserts its DR_MODE
     // (texture page) primitives ahead of these sprites in every OT slot.
-    AddMarginTiles(kTilemap, false, cam_x, cam_y, ot, g_cfg.margin);
+    AddMarginTiles(kTilemap, false, cam_x, cam_y, ot, g_margin);
     for (int l = 0; l < kBgLayerCount; ++l) {
       AddMarginTiles(kBgLayers + uint32_t(l) * kBgLayerStride, true, cam_x, cam_y, ot,
-                     g_cfg.margin);
+                     g_margin);
     }
   }
   g_render_tilemap(ctx, base);
 }
 
-// Screen-space (DRAW_ABSPOS) primitives that lie wholly outside the original
-// 256-pixel view were hidden by the authentic clip; the game parks HUD parts
-// there (for example the boss gauge at x=264). Keep them hidden: the same
-// fail-closed rule ar-recomp PR #1 applies to unbound layers. The drawMode
-// change is undone right after the original call, so game state is kept.
-int g_parked[kPrimCount];
+// --- Screen-space UI ------------------------------------------------------
+//
+// Screen-space primitives (DRAW_ABSPOS) use original-view coordinates, 0-255.
+// Three rules apply to them while the scene is expanded, in this order:
+//
+// 1. Dock. Primitives on the player-HUD chains split at the view centre, as
+//    ar-recomp splits its action HUD: the left group moves to the left edge
+//    of the widened picture (x - margin) and the right group to the right
+//    edge (x + margin). Parked parts stay outside the picture after the move,
+//    so the boss gauge still slides in from the right edge.
+// 2. Overlays. Untextured tiles and quads that cover the whole original
+//    width (fades, flashes) are widened to cover the margins too.
+// 3. Fail closed. Any other screen-space primitive wholly outside the
+//    original view stays hidden, as the original clip hid it.
+//
+// Centred UI such as dialogue keeps its position. Every change is made to a
+// copy-on-write record: the bytes are restored right after the original
+// call, so no game state changes.
+
+struct Saved {
+  int index;
+  uint8_t bytes[kPrimSize];
+};
+Saved g_saved[kPrimCount];
+bool g_is_hud[kPrimCount];
+
+void MarkHudChain(int32_t first) {
+  int32_t i = first;
+  for (int guard = 0; guard < 64 && i >= 0 && i < kPrimCount; ++guard) {
+    g_is_hud[i] = true;
+    uint32_t next = R32(kPrimBuf + uint32_t(i) * kPrimSize);
+    if (next < kPrimBuf || next >= kPrimBuf + kPrimCount * kPrimSize) break;
+    i = int32_t((next - kPrimBuf) / kPrimSize);
+  }
+}
+
+int VertexCount(int type) {
+  switch (type) {
+    case 2: return 2;  // LINE_G2
+    case 3:            // G4
+    case 4: return 4;  // GT4
+    case 5: return 3;  // GT3
+    default: return 0;
+  }
+}
+
+constexpr uint32_t kXs[4] = {kPrimX0, kPrimX1, kPrimX2, kPrimX3};
+
+void ShiftX(uint32_t p, int n, int dx) {
+  for (int k = 0; k < std::max(n, 1); ++k) {
+    W16(p + kXs[k], uint16_t(int16_t(int16_t(R16(p + kXs[k])) + dx)));
+  }
+}
 
 extern "C" void Expand_RenderPrimitives(PPCContext& ctx, uint8_t* base) {
-  int parked = 0;
+  int saved = 0;
   if (g_expanded_this_frame) {
+    const int m = g_margin;
+    std::memset(g_is_hud, 0, sizeof g_is_hud);
+    if (g_cfg.dock) {
+      MarkHudChain(int32_t(R32(kPlayerHud + 4)));
+      MarkHudChain(int32_t(R32(kPlayerHud + 8)));
+    }
     for (int i = 0; i < kPrimCount; ++i) {
       uint32_t p = kPrimBuf + uint32_t(i) * kPrimSize;
-      uint16_t mode = R16(p + 54);
+      uint16_t mode = R16(p + kPrimDrawMode);
       if (!(mode & kDrawAbsPos) || (mode & kDrawHide)) continue;
-      int type = R8(p + 5) & 0x0F;
-      int xs[4] = {int16_t(R16(p + 12)), int16_t(R16(p + 24)), int16_t(R16(p + 36)),
-                   int16_t(R16(p + 48))};
-      int n = 0, lo = 0, hi = 0;
-      switch (type) {
-        case 2: n = 2; break;  // LINE_G2
-        case 3:                // G4
-        case 4: n = 4; break;  // GT4
-        case 5: n = 3; break;  // GT3
-        case 1:                // TILE: width in u0
-          lo = xs[0], hi = xs[0] + R8(p + 16);
-          break;
-        default: continue;
+      int type = R8(p + kPrimType) & 0x0F;
+      int n = VertexCount(type);
+      int lo, hi;
+      if (type == 1 || type == 6) {  // TILE (width in u0) or SPRT (width in u1)
+        lo = int16_t(R16(p + kPrimX0));
+        hi = lo + R8(p + (type == 1 ? kPrimU0 : kPrimU1));
+      } else if (n) {
+        lo = hi = int16_t(R16(p + kPrimX0));
+        for (int k = 1; k < n; ++k) {
+          int x = int16_t(R16(p + kXs[k]));
+          lo = std::min(lo, x), hi = std::max(hi, x);
+        }
+      } else {
+        continue;
       }
-      if (n) {
-        lo = hi = xs[0];
-        for (int k = 1; k < n; ++k) lo = std::min(lo, xs[k]), hi = std::max(hi, xs[k]);
-      }
-      if (hi <= 0 || lo >= kStageWidth) {
-        W16(p + 54, uint16_t(mode | kDrawHide));
-        g_parked[parked++] = i;
+      uint16_t priority = R16(p + kPrimPriority);
+      bool hud = g_is_hud[i] && priority >= kHudPriorityLow && priority <= kHudPriorityHigh;
+      bool overlay = (type == 1 || type == 3) && lo <= 0 && hi >= kStageWidth - 1;
+      bool outside = hi <= 0 || lo >= kStageWidth;
+      if (!hud && !overlay && !outside) continue;
+
+      Saved& s = g_saved[saved++];
+      s.index = i;
+      std::memcpy(s.bytes, P(p), kPrimSize);
+      if (hud) {
+        bool left = lo + hi < kStageWidth;  // centre left of the view centre
+        ShiftX(p, n, left ? -m : m);
+        ++(left ? g_ui.docked_left : g_ui.docked_right);
+      } else if (overlay) {
+        if (type == 1) {
+          // A tile is at most 255 wide; draw it as a flat quad instead.
+          int y0 = int16_t(R16(p + kPrimY0)), y1 = y0 + R8(p + kPrimV0);
+          P(p)[kPrimType] = uint8_t((P(p)[kPrimType] & 0xF0) | 3);
+          for (uint32_t c : {kPrimR1, kPrimR2, kPrimR3}) std::memcpy(P(p + c), P(p + kPrimR0), 3);
+          W16(p + kPrimX0, uint16_t(int16_t(lo - m)));
+          W16(p + kPrimX1, uint16_t(int16_t(hi + m)));
+          W16(p + kPrimX2, uint16_t(int16_t(lo - m)));
+          W16(p + kPrimX3, uint16_t(int16_t(hi + m)));
+          W16(p + kPrimY1, uint16_t(int16_t(y0)));
+          W16(p + kPrimY2, uint16_t(int16_t(y1)));
+          W16(p + kPrimY3, uint16_t(int16_t(y1)));
+        } else {
+          for (int k = 0; k < 4; ++k) {
+            int x = int16_t(R16(p + kXs[k]));
+            if (x <= lo) x -= m;
+            if (x >= hi) x += m;
+            W16(p + kXs[k], uint16_t(int16_t(x)));
+          }
+        }
+        ++g_ui.overlays;
+      } else {
+        W16(p + kPrimDrawMode, uint16_t(mode | kDrawHide));
+        ++g_ui.hidden;
       }
     }
   }
   g_render_primitives(ctx, base);
-  for (int k = 0; k < parked; ++k) {
-    uint32_t p = kPrimBuf + uint32_t(g_parked[k]) * kPrimSize;
-    W16(p + 54, uint16_t(R16(p + 54) & ~kDrawHide));
+  for (int k = 0; k < saved; ++k) {
+    std::memcpy(P(kPrimBuf + uint32_t(g_saved[k].index) * kPrimSize), g_saved[k].bytes,
+                kPrimSize);
   }
 }
 
@@ -339,8 +476,24 @@ std::string Install(rex::Runtime* runtime) {
 }
 
 void BeforeFrame() {
-  g_expanded_this_frame = ApplyEnvs();
+  int margin = ResolveMargin();
+  g_expanded_this_frame = ApplyEnvs(margin);
+  g_margin = g_expanded_this_frame ? margin : 0;
   ApplyStretch(g_expanded_this_frame);
+}
+
+std::string Status() {
+  int32_t r[4];
+  for (int i = 0; i < 4; ++i) r[i] = int32_t(R32(kStretchRect + 4 * i));
+  char buf[200];
+  std::snprintf(buf, sizeof buf,
+                "margin=%d (%s) rect=%d,%d,%d,%d dock=%s ui: left=%d right=%d overlays=%d "
+                "hidden=%d",
+                g_margin, g_cfg.margin < 0 ? "auto" : "fixed", r[0], r[1], r[2], r[3],
+                g_cfg.dock ? "on" : "off", g_ui.docked_left, g_ui.docked_right, g_ui.overlays,
+                g_ui.hidden);
+  g_ui = UiCounts{};  // counters cover the frames since the previous status
+  return buf;
 }
 
 }  // namespace expand

@@ -117,3 +117,22 @@ The margin-tile function was rewritten from the recompiled routine
 | Final frame and entity tables | 0 pixels differ in the original view. Tables byte-identical |
 
 Images: `evidence/recheck/`.
+
+## Responsive margin and docked HUD
+
+Checked on 2026-10-03 in the prologue, with Auto margin.
+
+| Check | Result |
+|---|---|
+| Auto margin at PSX Default | 72 per side. Picture 400 PS1 px, rectangle (2,54)-(1277,666) |
+| Live preset changes: PSX Big, 16:10 Huge, 16:10 Extreme, back to PSX Default | 50, 12, 0, 72. The picture stays inside the frame |
+| Same frame, HUD undocked, original view in VRAM | 0 of 52,992 pixels differ |
+| Same frame, docked vs undocked | Only the HUD moves: 4,515 pixels in x 3..167, y 23..116 |
+| 960-frame activation A/B with Auto and docking | 0 mismatching frames. Off/off control also 0 |
+| Throne room | HUD on the left edge, dialogue box centred, border where the room ends |
+
+Not exercised: the right HUD group in view (the boss gauge needs the Dracula
+fight to start), widened fades (0 overlays counted), and Alucard's HUD.
+
+Images: `evidence/responsive-dock/`. Tools: `tools/ui-check.sh`,
+`tools/ui-compare.py`, `tools/responsive.sh`.
