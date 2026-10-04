@@ -1,0 +1,7 @@
+manifest_version = 2
+name = "Scene Expansion (research)"
+version = "0.1.0"
+game_version = "1.4.5"
+author = "simonwjackson"
+description = "Research build. Draws real scenery beside the original view without stretching, around an unchanged camera. Includes test controls; not for normal play."
+code = "scene_expansion"
