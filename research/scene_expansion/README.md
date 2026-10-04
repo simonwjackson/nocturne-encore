@@ -136,3 +136,30 @@ fight to start), widened fades (0 overlays counted), and Alucard's HUD.
 
 Images: `evidence/responsive-dock/`. Tools: `tools/ui-check.sh`,
 `tools/ui-compare.py`, `tools/responsive.sh`.
+
+## Room edges
+
+Checked on 2026-10-04 in the prologue, with Auto margin (72) and the HUD
+docked. Each capture compares one frozen frame three ways: expansion off,
+expansion on without bars, and expansion on with bars.
+
+| Room | Bars (left, right) | Original view, bars vs no bars | Changed pixels outside the bars | Bar pixels below the HUD rows that are not black |
+|---|---|---|---|---|
+| Stairs, right end (scroll 1024 of 1280) | 0, 72 | 0 of 52,992 differ | 0 | 0 |
+| Stairs, 10 px from the right end | 0, 62 | 0 of 52,992 differ | 0 | 0 |
+| Throne room, left end (scroll 0) | 72, 0 | 0 of 52,992 differ | 0 | 0 |
+
+In all three, the original view also matches the unexpanded frame below the
+docked HUD rows (y >= 120): 0 pixels differ. Above y 120 only the docked HUD
+differs, as before.
+
+The 960-frame activation A/B from the throne room, with bars on, had 31
+spawn or despawn events and 0 mismatching frames. The off/off control also
+had 0.
+
+In the throne room the camera is locked to 256 pixels (`g_Tilemap.width`),
+but the tile layout is 1280 pixels wide. The right margin shows the real
+tiles of the layout there, as before.
+
+Images: `evidence/room-edges/` (top: no bars, bottom: bars). Tools:
+`tools/edge-shot.sh`, `tools/edge-compare.py`.

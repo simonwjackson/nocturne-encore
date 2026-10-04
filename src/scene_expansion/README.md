@@ -20,6 +20,29 @@ docked. Disable the mod in the F1 mod manager to turn it off.
   ActRaiser action HUD.
 - Untextured fades and flashes that cover the original width are widened.
 - Other screen-space parts outside the original view stay hidden.
+- Room edges: margin columns past the end of the room are black, as in the
+  ActRaiser bounded-world margins. See below.
+
+## Room edges
+
+The room is the foreground tile layer: `hSize` blocks of 256 pixels. When
+the view is near either end of the room, the margin on that side shows space
+where the room has no tiles. Without a fix the PS1 clear colour (dark blue)
+shows there, with some background layers on top.
+
+Each frame the mod computes where the room starts and ends in view
+coordinates. It then adds one opaque black rectangle per side, from the room
+end to the picture edge. The bar grows pixel by pixel as the camera nears
+the room end and disappears when the camera moves away.
+
+- The bars cover only the margins. The original 256 columns never change.
+- They sit in ordering-table slot `0x1ED`: above scenery and sprites, below
+  the HUD (`0x1EE`-`0x1F0`) and the screen fade (`0x1FD`).
+- Background layers past the room end are covered too. This is the cost of
+  this approach.
+- The bounds come from the tile layout, not the camera limits. A room that
+  locks the camera, such as the throne room, still shows its real tiles
+  past the lock.
 
 ## Responsive margin
 
@@ -49,7 +72,8 @@ directory. `research/scene_expansion/tools/session.sh` sets it.
 - The mod adds a scripted pad for controller 0.
 - It reads commands from `$SCENE_PROBE_DIR/cmd`.
 - Expansion starts off. Send `expand on` to turn it on.
-- `margin auto|<n>`, `dock on|off`, and `status` change and report the layout.
+- `margin auto|<n>`, `dock on|off`, `edges on|off`, and `status` change and
+  report the layout.
 
 ## Limits
 

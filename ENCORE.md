@@ -51,7 +51,10 @@ To offer one enhancement upstream, branch from `upstream/main`, copy only its
    Not checked.
 10. Decide what the margins show: early reveals (Dracula on his throne) and
     pop-in at the margin edge.
-11. Rooms with invalid tile data outside the room, and repeating layers.
+11. Partly done: margins past the room end are black (`src/scene_expansion/
+    README.md`, "Room edges"). Open: rooms with invalid tile data inside the
+    layout, repeating layers, and whether camera-locked parts of a room
+    should show.
 12. Done for the Richter HUD: left and right groups dock to the picture
     edges. Open: the boss gauge in view, Alucard's HUD, widened fades.
 13. Native framing in the pause menu, map, inventory, cutscenes, room

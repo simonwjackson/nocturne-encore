@@ -141,6 +141,11 @@ void RunCommand(const std::string& line) {
     in >> v;
     expand::Settings().dock = v == "on";
     Log(line);
+  } else if (op == "edges") {
+    std::string v;
+    in >> v;
+    expand::Settings().edges = v == "on";
+    Log(line);
   } else if (op == "status") {
     Log(expand::Status());
   } else if (op == "snapshot") {

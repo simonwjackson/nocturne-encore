@@ -74,8 +74,14 @@ constexpr uint32_t kFlagAltPalette = 0x200; // rlwinm 0,22,22: palette index + 0
 constexpr uint32_t kFlagRepeat = 0x1000;    // rlwinm 0,19,19: background layers only
 
 constexpr int kStageWidth = 256;
+constexpr int kStageHeight = 256;  // the draw clip trims this to the real height
 constexpr int kPoolSprites = 4096;
 constexpr uint32_t kSpriteSize = 20;
+// Room-edge bars sit in this ordering-table slot: above the tile layers and
+// entities, below the HUD (0x1EE-0x1F0) and the screen fade (0x1FD). The
+// game draws its ordering table from slot 0 upward.
+constexpr uint32_t kEdgeSlot = 0x1ED;
+constexpr int kEdgeBars = 2;
 
 rex::Runtime* g_rt = nullptr;
 PPCFunc* g_render_tilemap = nullptr;
@@ -96,6 +102,10 @@ int g_applied_margin = 0;  // margin last written to the stage buffers
 struct UiCounts {
   int docked_left = 0, docked_right = 0, overlays = 0, hidden = 0;
 } g_ui;
+
+// Widths of the room-edge bars drawn in the last expanded frame.
+int g_edge_left = 0, g_edge_right = 0;
+uint32_t g_edge_pool = 0;  // guest address of the two bar packets
 
 uint8_t* P(uint32_t a) { return g_rt->memory()->TranslateVirtual<uint8_t*>(a); }
 uint32_t R32(uint32_t a) {
@@ -306,6 +316,40 @@ void AddMarginTiles(uint32_t layer, bool background, int cam_x, int cam_y, uint3
   }
 }
 
+// Paints the margin past the room's end black, as ar-recomp's bounded-world
+// margins do. The room is the foreground layer: hSize blocks of 256 pixels,
+// with room x 0 at view x (cam_x - scroll_x). The bars only cover the
+// margins, never the original 256 columns, so the original view is unchanged.
+// One opaque TILE packet per side, in the game's own format (written by
+// sub_8223B798): code 0x60, RGB at 8-10, x/y at 12/14, width/height at 16/18.
+void AddEdgeBars(int cam_x, uint32_t ot, int margin) {
+  g_edge_left = g_edge_right = 0;
+  uint32_t flags = R32(kTilemap + kLayerFlags) & 0xFFFF;
+  if (!(flags & kFlagVisible) || !R32(kTilemap + kLayerTiles)) return;
+  int room_w = int(R32(kTilemap + kLayerW)) * 256;
+  if (room_w <= 0) return;
+  int room_x0 = cam_x - int16_t(R16(kTilemap + kLayerScrollX));
+  int room_x1 = room_x0 + room_w;
+  // Each bar: [from, to) in view coordinates.
+  int bars[kEdgeBars][2] = {{-margin, std::min(room_x0, 0)},
+                            {std::max(room_x1, kStageWidth), kStageWidth + margin}};
+  for (int i = 0; i < kEdgeBars; ++i) {
+    int from = std::max(bars[i][0], -margin);
+    int to = std::min(bars[i][1], kStageWidth + margin);
+    if (to <= from) continue;
+    uint32_t t = g_edge_pool + uint32_t(i) * kSpriteSize;
+    std::memset(P(t), 0, kSpriteSize);
+    P(t)[4] = 20;    // length, as the game writes it
+    P(t)[5] = 0x60;  // TILE, opaque; RGB stays 0 (black)
+    W16(t + 12, uint16_t(int16_t(from)));
+    W16(t + 14, 0);
+    W16(t + 16, uint16_t(to - from));
+    W16(t + 18, uint16_t(kStageHeight));
+    AddPrim(ot, kEdgeSlot, t);
+    (i == 0 ? g_edge_left : g_edge_right) = to - from;
+  }
+}
+
 bool g_expanded_this_frame = false;
 
 extern "C" void Expand_RenderTilemap(PPCContext& ctx, uint8_t* base) {
@@ -320,6 +364,11 @@ extern "C" void Expand_RenderTilemap(PPCContext& ctx, uint8_t* base) {
     for (int l = 0; l < kBgLayerCount; ++l) {
       AddMarginTiles(kBgLayers + uint32_t(l) * kBgLayerStride, true, cam_x, cam_y, ot,
                      g_margin);
+    }
+    if (g_cfg.edges) {
+      AddEdgeBars(cam_x, ot, g_margin);
+    } else {
+      g_edge_left = g_edge_right = 0;
     }
   }
   g_render_tilemap(ctx, base);
@@ -467,12 +516,13 @@ Config& Settings() { return g_cfg; }
 std::string Install(rex::Runtime* runtime) {
   g_rt = runtime;
   g_pool = runtime->memory()->SystemHeapAlloc(kPoolSprites * kSpriteSize);
+  g_edge_pool = runtime->memory()->SystemHeapAlloc(kEdgeBars * kSpriteSize);
   auto* d = runtime->function_dispatcher();
   bool ok = d->OverrideFunction(kRenderTilemapFn, &Expand_RenderTilemap, &g_render_tilemap) &&
             d->OverrideFunction(kUpdateGameFn, &Expand_UpdateGame, &g_update_game) &&
             d->OverrideFunction(kRenderPrimitivesFn, &Expand_RenderPrimitives,
                                 &g_render_primitives);
-  return std::string("expand install ") + (ok && g_pool ? "ok" : "FAILED");
+  return std::string("expand install ") + (ok && g_pool && g_edge_pool ? "ok" : "FAILED");
 }
 
 void BeforeFrame() {
@@ -485,13 +535,13 @@ void BeforeFrame() {
 std::string Status() {
   int32_t r[4];
   for (int i = 0; i < 4; ++i) r[i] = int32_t(R32(kStretchRect + 4 * i));
-  char buf[200];
+  char buf[256];
   std::snprintf(buf, sizeof buf,
                 "margin=%d (%s) rect=%d,%d,%d,%d dock=%s ui: left=%d right=%d overlays=%d "
-                "hidden=%d",
+                "hidden=%d edges=%s bars: left=%d right=%d",
                 g_margin, g_cfg.margin < 0 ? "auto" : "fixed", r[0], r[1], r[2], r[3],
                 g_cfg.dock ? "on" : "off", g_ui.docked_left, g_ui.docked_right, g_ui.overlays,
-                g_ui.hidden);
+                g_ui.hidden, g_cfg.edges ? "on" : "off", g_edge_left, g_edge_right);
   g_ui = UiCounts{};  // counters cover the frames since the previous status
   return buf;
 }

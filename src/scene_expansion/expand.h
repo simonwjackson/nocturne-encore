@@ -17,6 +17,8 @@ struct Config {
   int margin = -1;
   // Pin the player HUD's left and right groups to the edges of the picture.
   bool dock = true;
+  // Paint the margin past the room's end black instead of the clear colour.
+  bool edges = true;
 };
 
 Config& Settings();
