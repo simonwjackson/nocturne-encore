@@ -1,6 +1,10 @@
 // scene_probe: throwaway research mod for the scene-expansion proof.
 //
-// Control directory: $SCENE_PROBE_DIR (default /tmp/nocturne-expand/ctl).
+// Normal play: expansion is on, the margin is Auto and the HUD is docked.
+// Nothing else is installed.
+//
+// Research mode: set $SCENE_PROBE_DIR to a control directory. Only then does
+// the mod add the scripted pad and read commands, and expansion starts off.
 //   buttons   one line "<hex buttons>" applied to pad 0 while the file exists
 //   cmd       one command per line; consumed (deleted) at the next frame
 //   log       append-only probe log
@@ -64,8 +68,13 @@ fs::path g_trace;
 PPCFunc* g_original_main_iter = nullptr;
 std::atomic<uint64_t> g_frame{0};
 fs::path g_dir;
+bool g_research = false;
 
 void Log(const std::string& line) {
+  if (!g_research) {
+    REXLOG_INFO("[scene_expansion] {}", line);
+    return;
+  }
   std::ofstream out(g_dir / "log", std::ios::app);
   out << "[" << g_frame.load() << "] " << line << "\n";
 }
@@ -223,7 +232,7 @@ void TraceFrame() {
 }
 
 extern "C" void SceneProbe_MainIter(PPCContext& ctx, uint8_t* base) {
-  PollCommands();
+  if (g_research) PollCommands();
   if (g_script_active) {
     g_script_buttons = g_script_frames[g_script_pos];
   }
@@ -288,6 +297,7 @@ class SceneProbe : public rex::system::IModPlugin {
 
   void OnCreateDialogs(rex::ui::ImGuiDrawer*) override {
     auto* input = static_cast<rex::input::InputSystem*>(g_runtime->input_system());
+    if (!g_research) return;
     input->AddDriver(std::make_unique<ScriptedPad>());
     Log("scripted pad added");
   }
@@ -315,7 +325,12 @@ extern "C" REX_MOD_PLUGIN_EXPORT rex::system::IModPlugin* rex_mod_create(
     return nullptr;
   }
   const char* dir = std::getenv("SCENE_PROBE_DIR");
-  g_dir = dir ? dir : "/tmp/nocturne-expand/ctl";
-  fs::create_directories(g_dir);
+  g_research = dir && *dir;
+  if (g_research) {
+    g_dir = dir;
+    fs::create_directories(g_dir);
+  } else {
+    expand::Settings().enabled = true;
+  }
   return new SceneProbe(ctx->runtime);
 }

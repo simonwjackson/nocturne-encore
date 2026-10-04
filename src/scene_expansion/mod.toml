@@ -1,7 +1,7 @@
 manifest_version = 2
-name = "Scene Expansion (research)"
-version = "0.1.0"
+name = "Scene Expansion"
+version = "0.2.0"
 game_version = "1.4.5"
 author = "simonwjackson"
-description = "Research build. Draws real scenery beside the original view without stretching, around an unchanged camera. Includes test controls; not for normal play."
+description = "Shows real scenery beside the original view without stretching, around an unchanged camera. The margin follows the stretch preset and the HUD docks to the picture edges. Vanilla v1.4.5 only."
 code = "scene_expansion"

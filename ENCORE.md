@@ -37,8 +37,8 @@ To offer one enhancement upstream, branch from `upstream/main`, copy only its
    `sub_82258190`, not sotn-decomp (AGPL-3.0). Confirm this before any
    upstream offer.
 2. Ask the maintainer whether to send it as a mod or as an in-app feature.
-3. Move the test controls (scripted pad, command file, snapshot, freeze) to a
-   separate dev mod.
+3. Partly done: the test controls only load when `$SCENE_PROBE_DIR` is set.
+   Moving them into a separate dev mod is still open.
 4. Look up addresses through `game_symbols`. Add the title-update build.
 5. Add an on/off setting that persists and changes live.
 6. Done: Auto margin from the front-end frame and the stretch preset, live.
@@ -62,4 +62,5 @@ To offer one enhancement upstream, branch from `upstream/main`, copy only its
 16. Builds for windows-x64, linux-x64 and linux-arm64. Performance on the Odin.
 17. Unit tests for the size calculation that run without game files.
 18. Release packaging: manifest, icon, README, before and after images.
-19. Ship a pinned release in the Korri Nocturne plugin.
+19. Done: the Korri Nocturne plugin in simonwjackson/korri-plugins builds
+    this mod from a pinned commit and enables it.

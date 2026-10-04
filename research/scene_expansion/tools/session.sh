@@ -12,5 +12,5 @@ pulseaudio --daemonize=no --exit-idle-time=-1 --use-pid-file=no --disable-shm -n
 PULSE=$!
 trap 'kill $PULSE 2>/dev/null || true' EXIT
 for _ in $(seq 100); do [ -S "$SOCK" ] && break; sleep 0.1; done
-export VK_ICD_FILENAMES=/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json DISPLAY=:77 SDL_AUDIODRIVER=pulseaudio SDL_VIDEODRIVER=x11 PULSE_SERVER="unix:$SOCK"
+export SCENE_PROBE_DIR=${SCENE_PROBE_DIR:-/tmp/nocturne-expand/ctl} VK_ICD_FILENAMES=/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json DISPLAY=:77 SDL_AUDIODRIVER=pulseaudio SDL_VIDEODRIVER=x11 PULSE_SERVER="unix:$SOCK"
 "$(dirname "$(realpath "$0")")/run.sh" "$RUN" "$@"

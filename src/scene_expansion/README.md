@@ -1,11 +1,14 @@
-# Scene Expansion (research build)
+# Scene Expansion
 
 Shows real scenery on both sides of the original 256-pixel view, at the same
 pixel scale. The gameplay camera does not move. The game draws its original
 view, and the mod draws the extra tile columns around it.
 
-Status: research. It passes the one-room proof in
-`research/scene_expansion/README.md`. It is not ready for normal play.
+Status: early. It passes the one-room proof in
+`research/scene_expansion/README.md`. Only the prologue is tested.
+
+When the mod is enabled, expansion is on, the margin is Auto and the HUD is
+docked. Disable the mod in the F1 mod manager to turn it off.
 
 ## What it changes
 
@@ -38,14 +41,13 @@ get more scenery.
 
 It never writes camera, scroll, layout or entity state.
 
-## Research controls
+## Research mode
 
-This build also contains test controls. They must move to a separate dev mod
-before any release.
+The test controls are off unless `$SCENE_PROBE_DIR` names a control
+directory. `research/scene_expansion/tools/session.sh` sets it.
 
-- It replaces controller 0 with a scripted pad.
-- It reads commands from `$SCENE_PROBE_DIR/cmd`. The default directory is
-  `/tmp/nocturne-expand/ctl`.
+- The mod adds a scripted pad for controller 0.
+- It reads commands from `$SCENE_PROBE_DIR/cmd`.
 - Expansion starts off. Send `expand on` to turn it on.
 - `margin auto|<n>`, `dock on|off`, and `status` change and report the layout.
 
